@@ -7,6 +7,9 @@ This repository provides a REST API for DNA sequence analysis and nuclei segment
 
 ## **Setting Up the Environment**
 
+Clone this repository in your method of preference
+
+
 To install the required dependencies, run:
 ```sh
 pip install -r requirements.txt

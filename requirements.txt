@@ -6,3 +6,5 @@ pillow
 python-multipart
 matplotlib
 pandas
+seaborn
+scikit-learn
