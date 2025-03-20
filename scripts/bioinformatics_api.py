@@ -1,15 +1,36 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile
+from pydantic import BaseModel
+import re
 import cv2
 import numpy as np
 from io import BytesIO
 from PIL import Image
-import base64
 import os
 from fastapi.responses import FileResponse
+import pandas as pd
 
 app = FastAPI()
 
-SAVE_DIR = "processed_images"
+class DNASequence(BaseModel):
+    sequence: str
+
+def validate_dna(seq: str):
+    if not re.match("^[ACGTacgt]+$", seq):
+        raise HTTPException(status_code=400, detail="Invalid DNA sequence. Only A, C, G, T are allowed.")
+
+def gc_content(seq: str) -> float:
+    gc_count = sum(1 for base in seq if base in "GCgc")
+    return round((gc_count / len(seq)) * 100, 2) if seq else 0.0
+
+def reverse_complement(seq: str) -> str:
+    complement = str.maketrans("ACGTacgt", "TGCAtgca")
+    return seq.translate(complement)[::-1]
+
+def transcribe(seq: str) -> str:
+    return seq.replace("T", "U").replace("t", "u")
+
+
+SAVE_DIR = "./asset/processed_images"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 def process_image(image_bytes: bytes, filename: str):
@@ -41,7 +62,7 @@ def process_image(image_bytes: bytes, filename: str):
 
     # List to store circular objects that are big enough
     circular_objects = []
-
+    nuclei_shapes = []
     for contour in contours:
         area = cv2.contourArea(contour)
         perimeter = cv2.arcLength(contour, True)
@@ -55,6 +76,9 @@ def process_image(image_bytes: bytes, filename: str):
         # Keep only objects that are circular and large enough
         if circularity >= circularity_threshold:
             circular_objects.append(contour)
+            nuclei_shapes.append([area,perimeter,circularity])
+    csv_filename = f"{filename.split('.')[0]}nuclei_shape_features.csv"
+    pd.DataFrame(nuclei_shapes, columns=['area', 'perimeter', 'circularity']).to_csv(os.path.join(SAVE_DIR, csv_filename), index=False)
 
     num_cells = len(circular_objects)
 
@@ -63,21 +87,38 @@ def process_image(image_bytes: bytes, filename: str):
     cv2.drawContours(image_output, circular_objects, -1, (0, 0, 255), 3)  # Green contours for nuclei
 
     # Save the processed image
-    processed_filename = os.path.join(SAVE_DIR, f"processed_{filename}.png")
+    processed_filename = os.path.join(SAVE_DIR, f"processed_{filename.split('.')[0]}.png")
     cv2.imwrite(processed_filename, image_output)
 
-    return processed_filename, num_cells
+    return processed_filename, csv_filename, num_cells
+
+@app.post("/gc-content/")
+async def get_gc_content(data: DNASequence):
+    validate_dna(data.sequence)
+    return {"sequence": data.sequence, "gc_content": gc_content(data.sequence)}
+
+@app.post("/reverse-complement/")
+async def get_reverse_complement(data: DNASequence):
+    validate_dna(data.sequence)
+    return {"sequence": data.sequence, "reverse_complement": reverse_complement(data.sequence)}
+
+@app.post("/transcribe/")
+async def get_transcription(data: DNASequence):
+    validate_dna(data.sequence)
+    return {"sequence": data.sequence, "transcription": transcribe(data.sequence)}
+
 @app.post("/analyze-image/")
 async def analyze_image(file: UploadFile = File(...)):
     """API to analyze image and return download link."""
 
     image_bytes = await file.read()
-    processed_filepath, num_cells = process_image(image_bytes, file.filename)
+    processed_filepath, csv_filename, num_cells = process_image(image_bytes, file.filename)
 
     return {
         "filename": file.filename,
         "num_cells_detected": num_cells,
-        "processed_image_url": f"http://127.0.0.1:8000/download/{os.path.basename(processed_filepath)}"
+        "processed_image_url": f"http://127.0.0.1:8000/download/{os.path.basename(processed_filepath)}",
+        "nuclei_shape_dataframe": f"http://127.0.0.1:8000/download/{os.path.basename(csv_filename)}"
     }
 
 
@@ -86,7 +127,9 @@ async def download_processed_image(filename: str):
     """ Endpoint to serve processed images. """
     file_path = os.path.join(SAVE_DIR, filename)
     return FileResponse(file_path, media_type="image/png", filename=filename)
-
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the Microscopic Image Analysis REST API"}
+    return {"message": "Welcome to the Bioinformatics REST API"}
+
+
+
