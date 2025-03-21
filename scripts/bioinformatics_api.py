@@ -210,7 +210,6 @@ def kmeans_clustering(csv_path: str, n_clusters: int = 3):
         np.array(shape(feature["geometry"]).exterior.coords, dtype=np.int32)
         for feature in loaded_geojson["features"]
     ]
-    print(len(contours_list))
 
     image_path = csv_path.replace('csv','png')
     image = cv2.imread(image_path)
@@ -225,37 +224,26 @@ def kmeans_clustering(csv_path: str, n_clusters: int = 3):
             cv2.putText(image, str(cluster), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX,
                         fontScale=1, color=(0, 255, 255), thickness=2)
         else:
-            print("Zero contour area, no centroid.")
+            continue
 
     # Save the clustered image
+    # processed_filename = os.path.join(SAVE_DIR, "microscopic_sample_clustered.png")
     processed_filename = image_path.replace('.png', '_clustered.png')
     # Save
     cv2.imwrite(processed_filename, image)
-    # image.save(processed_filename)
-    return {"clusters": df['cluster'].tolist(), "centroids": cluster_centers,
-            "message": "CSV file updated with cluster column",
-            "processed_image_url": f"http://127.0.0.1:8000/download/{os.path.basename(processed_filename)}",
-            }
 
+    # Optional: Force sync
+    # with open(processed_filename, 'rb') as f:
+    #     os.fsync(f.fileno())
 
-# @app.get("/pca")
-# def pca_analysis(csv_path: str):
-#     if not os.path.exists(csv_path):
-#         raise HTTPException(status_code=400, detail="CSV file not found.")
-#     df = pd.read_csv(csv_path)
-#
-#     pca = PCA(n_components=2)
-#     principal_components = pca.fit_transform(df)
-#     df_pca = pd.DataFrame(principal_components, columns=['PC1', 'PC2'])
-#
-#     plt.figure(figsize=(8, 6))
-#     sns.scatterplot(x=df_pca['PC1'], y=df_pca['PC2'])
-#     plt.xlabel("Principal Component 1")
-#     plt.ylabel("Principal Component 2")
-#     pca_path = os.path.join(SAVE_DIR, "pca_plot.png")
-#     plt.savefig(pca_path, format='png')  # Ensure correct format
-#     plt.close()
-#     return FileResponse(pca_path, media_type="image/png")
+    if not os.path.exists(processed_filename):
+        raise HTTPException(status_code=500, detail="Processed image not found.")
+
+    if os.path.getsize(processed_filename) == 0:
+        raise HTTPException(status_code=500, detail="Processed image is empty.")
+
+    return FileResponse(processed_filename, media_type="image/png", filename="microscopic_sample_clustered.png")
+
 @app.get("/pca")
 def pca_analysis(csv_path: str):
     if not os.path.exists(csv_path):
