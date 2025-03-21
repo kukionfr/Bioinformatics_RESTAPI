@@ -1,15 +1,31 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile
-from pydantic import BaseModel
 import re
 import cv2
-import numpy as np
 from io import BytesIO
-from PIL import Image
-import os
-from fastapi.responses import FileResponse
+from PIL import Image, ImageDraw, ImageFont
+import uuid
+from geojson import Feature, FeatureCollection
+from fastapi import FastAPI, HTTPException, File, UploadFile
+from pydantic import BaseModel
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import os
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from fastapi.responses import JSONResponse, FileResponse
+from shapely.geometry import Polygon, shape
+import json
+import matplotlib
+matplotlib.use('Agg')
+
 
 app = FastAPI()
+
+SAVE_DIR = "./asset/processed_images"
+os.makedirs(SAVE_DIR, exist_ok=True)
+# Global dictionary to store KMeans results
+kmeans_results = {}
 
 class DNASequence(BaseModel):
     sequence: str
@@ -28,10 +44,6 @@ def reverse_complement(seq: str) -> str:
 
 def transcribe(seq: str) -> str:
     return seq.replace("T", "U").replace("t", "u")
-
-
-SAVE_DIR = "./asset/processed_images"
-os.makedirs(SAVE_DIR, exist_ok=True)
 
 def process_image(image_bytes: bytes, filename: str):
     """ Process microscopic image using refined DAPI-stained nuclei detection and save the result. """
@@ -76,8 +88,8 @@ def process_image(image_bytes: bytes, filename: str):
         # Keep only objects that are circular and large enough
         if circularity >= circularity_threshold:
             circular_objects.append(contour)
-            nuclei_shapes.append([area,perimeter,circularity])
-    csv_filename = f"{filename.split('.')[0]}nuclei_shape_features.csv"
+            nuclei_shapes.append([round(area,2),round(perimeter,2),round(circularity,2)])
+    csv_filename = f"{filename.split('.')[0]}.csv"
     pd.DataFrame(nuclei_shapes, columns=['area', 'perimeter', 'circularity']).to_csv(os.path.join(SAVE_DIR, csv_filename), index=False)
 
     num_cells = len(circular_objects)
@@ -87,10 +99,29 @@ def process_image(image_bytes: bytes, filename: str):
     cv2.drawContours(image_output, circular_objects, -1, (0, 0, 255), 3)  # Green contours for nuclei
 
     # Save the processed image
-    processed_filename = os.path.join(SAVE_DIR, f"processed_{filename.split('.')[0]}.png")
+    processed_filename = os.path.join(SAVE_DIR, f"{filename.split('.')[0]}.png")
     cv2.imwrite(processed_filename, image_output)
 
-    return processed_filename, csv_filename, num_cells
+    # output contour
+    # Convert contours into a DataFrame
+    df = pd.DataFrame({'contours': [Polygon(contour[:, 0, :]) for contour in circular_objects]})
+
+    # Create GeoJSON features
+    df['feat'] = df.apply(lambda x: Feature(
+        geometry=x['contours'],
+        properties={"objectType": "annotation"},
+        id=str(uuid.uuid1())
+    ), axis=1)
+
+    # Convert to GeoJSON structure
+    geojson = FeatureCollection(df['feat'].tolist())
+
+    # Save to file
+    geojson_path = f"{SAVE_DIR}/{filename.split('.')[0]}.geojson"
+    with open(geojson_path, 'w') as f:
+        json.dump(geojson, f, indent=4)
+
+    return processed_filename, csv_filename, geojson_path, num_cells
 
 @app.post("/gc-content/")
 async def get_gc_content(data: DNASequence):
@@ -112,13 +143,14 @@ async def analyze_image(file: UploadFile = File(...)):
     """API to analyze image and return download link."""
 
     image_bytes = await file.read()
-    processed_filepath, csv_filename, num_cells = process_image(image_bytes, file.filename)
+    processed_filepath, csv_filename, geojson_path, num_cells = process_image(image_bytes, file.filename)
 
     return {
         "filename": file.filename,
         "num_cells_detected": num_cells,
         "processed_image_url": f"http://127.0.0.1:8000/download/{os.path.basename(processed_filepath)}",
-        "nuclei_shape_dataframe": f"http://127.0.0.1:8000/download/{os.path.basename(csv_filename)}"
+        "nuclei_shape_dataframe": f"http://127.0.0.1:8000/download/{os.path.basename(csv_filename)}",
+        "nuclei_contour": f"http://127.0.0.1:8000/download/{os.path.basename(geojson_path)}"
     }
 
 
@@ -127,6 +159,151 @@ async def download_processed_image(filename: str):
     """ Endpoint to serve processed images. """
     file_path = os.path.join(SAVE_DIR, filename)
     return FileResponse(file_path, media_type="image/png", filename=filename)
+
+@app.get("/eda")
+def exploratory_data_analysis(csv_path: str):
+    if not os.path.exists(csv_path):
+        raise HTTPException(status_code=400, detail="CSV file not found.")
+    df = pd.read_csv(csv_path)
+    summary = df.describe().to_dict()
+    return JSONResponse(content=summary)
+
+
+@app.get("/pairplot")
+def generate_pairplot(csv_path: str):
+    if not os.path.exists(csv_path):
+        raise HTTPException(status_code=400, detail="CSV file not found.")
+    df = pd.read_csv(csv_path)
+
+    plt.figure(figsize=(8, 6))
+    sns.pairplot(df)
+    pairplot_path = os.path.join(SAVE_DIR, "pairplot.png")
+    plt.savefig(pairplot_path, format='png')  # Ensure correct format
+    plt.close()
+    return FileResponse(pairplot_path, media_type="image/png")
+
+
+@app.get("/kmeans")
+def kmeans_clustering(csv_path: str, n_clusters: int = 3):
+    if not os.path.exists(csv_path):
+        raise HTTPException(status_code=400, detail="CSV file not found.")
+    df = pd.read_csv(csv_path)
+
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    clusters = kmeans.fit_predict(df)
+    df['cluster'] = clusters
+    # Store results globally
+    kmeans_results[csv_path] = clusters.tolist()
+    cluster_centers = kmeans.cluster_centers_.tolist()
+
+    # Overwrite the original CSV with the new column
+    df.to_csv(csv_path, index=False)
+
+    geojson_path = csv_path.replace('csv','geojson')
+
+    # Load the GeoJSON file
+    with open(geojson_path, "r") as f:
+        loaded_geojson = json.load(f)
+
+    # Convert GeoJSON back to list of contours (NumPy arrays)
+    contours_list = [
+        np.array(shape(feature["geometry"]).exterior.coords, dtype=np.int32)
+        for feature in loaded_geojson["features"]
+    ]
+    print(len(contours_list))
+
+    image_path = csv_path.replace('csv','png')
+    image = cv2.imread(image_path)
+    # Loop through contours
+    for idx,cnt in enumerate(contours_list):
+        M = cv2.moments(cnt)
+        if M["m00"] != 0:  # Avoid division by zero
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            cluster = df['cluster'].iloc[idx]
+            # draw.text((cx, cy), str(cluster), fill="red", font=font)
+            cv2.putText(image, str(cluster), (cx, cy), cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=1, color=(0, 255, 255), thickness=2)
+        else:
+            print("Zero contour area, no centroid.")
+
+    # Save the clustered image
+    processed_filename = image_path.replace('.png', '_clustered.png')
+    # Save
+    cv2.imwrite(processed_filename, image)
+    # image.save(processed_filename)
+    return {"clusters": df['cluster'].tolist(), "centroids": cluster_centers,
+            "message": "CSV file updated with cluster column",
+            "processed_image_url": f"http://127.0.0.1:8000/download/{os.path.basename(processed_filename)}",
+            }
+
+
+# @app.get("/pca")
+# def pca_analysis(csv_path: str):
+#     if not os.path.exists(csv_path):
+#         raise HTTPException(status_code=400, detail="CSV file not found.")
+#     df = pd.read_csv(csv_path)
+#
+#     pca = PCA(n_components=2)
+#     principal_components = pca.fit_transform(df)
+#     df_pca = pd.DataFrame(principal_components, columns=['PC1', 'PC2'])
+#
+#     plt.figure(figsize=(8, 6))
+#     sns.scatterplot(x=df_pca['PC1'], y=df_pca['PC2'])
+#     plt.xlabel("Principal Component 1")
+#     plt.ylabel("Principal Component 2")
+#     pca_path = os.path.join(SAVE_DIR, "pca_plot.png")
+#     plt.savefig(pca_path, format='png')  # Ensure correct format
+#     plt.close()
+#     return FileResponse(pca_path, media_type="image/png")
+@app.get("/pca")
+def pca_analysis(csv_path: str):
+    if not os.path.exists(csv_path):
+        raise HTTPException(status_code=400, detail="CSV file not found.")
+
+    df = pd.read_csv(csv_path)
+
+    # Perform PCA
+    pca = PCA(n_components=2)
+    principal_components = pca.fit_transform(df)
+    df_pca = pd.DataFrame(principal_components, columns=['PC1', 'PC2'])
+
+    # Retrieve cluster labels if KMeans was run before
+    clusters = kmeans_results.get(csv_path, [None] * len(df_pca))  # Default to None if missing
+
+    df_pca['Cluster'] = clusters
+
+    # Plot PCA with cluster labels
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x=df_pca['PC1'], y=df_pca['PC2'], hue=df_pca['Cluster'], palette="tab10")
+
+    # Annotate points with cluster numbers
+    for i, (x, y) in enumerate(zip(df_pca['PC1'], df_pca['PC2'])):
+        plt.text(x, y, str(df_pca['Cluster'][i]), fontsize=9, ha='right', color='black')
+
+    plt.xlabel("Principal Component 1")
+    plt.ylabel("Principal Component 2")
+    plt.title("PCA Plot with Cluster Labels")
+    plt.legend(title="Clusters")
+
+    # Save the plot
+    pca_path = os.path.join(SAVE_DIR, "pca_plot.png")
+    plt.savefig(pca_path, format='png')
+    plt.close()
+
+    return FileResponse(pca_path, media_type="image/png")
+
+@app.post("/upload_csv")
+def upload_csv(file: UploadFile = File(...)):
+    try:
+        file_location = f"./asset/processed_images/{file.filename}"
+        with open(file_location, "wb") as buffer:
+            buffer.write(file.file.read())
+        return {"message": "CSV uploaded successfully", "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Bioinformatics REST API"}
