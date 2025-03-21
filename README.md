@@ -73,6 +73,9 @@ curl -X POST "http://127.0.0.1:8000/transcribe/"      -H "Content-Type: applicat
 ```sh
 curl -X POST "http://127.0.0.1:8000/analyze-image/"      -H "accept: application/json"      -H "Content-Type: multipart/form-data"      -F "file=@./asset/microscopic_sample.jpg"
 ```
+##### **Sample input image:**
+ "microscopic_sample.jpg" is provided in asset folder 
+![Microscopic Sample](./asset/readme_asset/microscopic_sample.jpg)
 ##### **Expected Response:**
 ```json
 {"filename":"microscopic_sample.jpg",
@@ -123,8 +126,8 @@ curl -X GET "http://127.0.0.1:8000/kmeans?csv_path=./asset/processed_images/micr
 ```json
 {"clusters":[0,0,0,0,0,1,0,0,0,1,1,1,0,0,0,0,0,0,2],"centroids":[[964.7142857142857,128.0275702902249,0.7424552692749306],[1266.375,150.23580291867256,0.709093381954237],[561.5,105.6984841823578,0.6315708925691229]]}
 ```
-Returns cluster assignments for each data point and cluster centroids.
 Output cluster overlaid nuclei image as shown below
+
 ![Cluster Image](./asset/readme_asset/microscopic_sample_clustered.png)
 
 
