@@ -4,7 +4,7 @@ from io import BytesIO
 from PIL import Image
 import uuid
 from geojson import Feature, FeatureCollection
-from fastapi import FastAPI, HTTPException, File, UploadFile, , Query
+from fastapi import FastAPI, HTTPException, File, UploadFile, Query
 from pydantic import BaseModel
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -24,7 +24,7 @@ import statsmodels.api as sm
 
 app = FastAPI()
 
-SAVE_DIR = "./asset/processed_images"
+SAVE_DIR = "./asset/generated_output"
 os.makedirs(SAVE_DIR, exist_ok=True)
 # Global dictionary to store KMeans results
 kmeans_results = {}
