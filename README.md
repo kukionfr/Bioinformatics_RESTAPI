@@ -66,7 +66,7 @@ SELECT * WHERE {
 ```
 **Response:**
 ```json
-{"results":[{"var0":"http://example.org/sequence/4cd8a511-82b8-473c-8174-47514e83150c"}]}```
+{"results":[{"var0":"http://example.org/sequence/4cd8a511-82b8-473c-8174-47514e83150c"}]}
 ```
 
 ---
