@@ -13,7 +13,7 @@ import numpy as np
 import os
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from shapely.geometry import Polygon, shape
 import json
 import matplotlib
@@ -21,8 +21,15 @@ matplotlib.use('Agg')
 import urllib.request
 import gzip
 import statsmodels.api as sm
+from rdflib import Graph, Namespace, URIRef, Literal
+from rdflib.namespace import RDF, XSD
 
 app = FastAPI()
+
+# RDF Setup
+BIO = Namespace("http://example.org/bio#")
+SEQUENCE_BASE = "http://example.org/sequence/"
+graph = Graph()
 
 SAVE_DIR = "./asset/generated_output"
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -31,6 +38,9 @@ kmeans_results = {}
 
 class DNASequence(BaseModel):
     sequence: str
+
+class SPARQLQuery(BaseModel):
+    query: str
 
 def validate_dna(seq: str):
     if not re.match("^[ACGTacgt]+$", seq):
@@ -441,7 +451,44 @@ def upload_csv(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/sequence/rdf", response_class=PlainTextResponse)
+def add_sequence_rdf(dna: DNASequence):
+    validate_dna(dna.sequence)
+    seq_id = str(uuid.uuid4())
+    seq_uri = URIRef(SEQUENCE_BASE + seq_id)
 
+    graph.add((seq_uri, RDF.type, BIO.DNASequence))
+    graph.add((seq_uri, BIO.sequence, Literal(dna.sequence)))
+    graph.add((seq_uri, BIO.gcContent, Literal(gc_content(dna.sequence), datatype=XSD.float)))
+    graph.add((seq_uri, BIO.reverseComplement, Literal(reverse_complement(dna.sequence))))
+    graph.add((seq_uri, BIO.transcript, Literal(transcribe(dna.sequence))))
+
+    return graph.serialize(format="turtle")
+
+@app.get("/sparql")
+def sparql_query_get(query: str = Query(..., description="SPARQL query string")):
+    try:
+        result = graph.query(query)
+        bindings = []
+        for row in result:
+            bindings.append({f"var{i}": str(val) for i, val in enumerate(row)})
+        return JSONResponse(content={"results": bindings})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/sparql")
+def sparql_query_post(sparql: SPARQLQuery):
+    try:
+        result = graph.query(sparql.query)
+        bindings = []
+        for row in result:
+            bindings.append({f"var{i}": str(val) for i, val in enumerate(row)})
+        return JSONResponse(content={"results": bindings})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Example RDF namespace setup
+graph.bind("bio", BIO)
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Bioinformatics REST API"}

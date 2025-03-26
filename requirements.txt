@@ -11,4 +11,4 @@ scikit-learn
 shapely
 geojson
 statsmodels
-
+rdflib

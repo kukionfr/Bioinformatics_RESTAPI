@@ -34,38 +34,41 @@ curl -X GET "http://127.0.0.1:8000/"
 ---
 
 ## 🧪 DNA Sequence Analysis
-### 🔬 Endpoints
-
-#### 1️⃣ GC Content
+### 🔬 Example Request to /sequence/rdf 
+#### 1️⃣ GC Content  2️⃣ Reverse Complement  3️⃣ Transcription (DNA ➜ RNA)
 ```bash
-curl -X POST "http://127.0.0.1:8000/gc-content/" -H "Content-Type: application/json" -d '{"sequence": "ATGCGC"}'
+curl -X POST "http://localhost:8000/sequence/rdf" -H "Content-Type: application/json" -d '{"sequence": "ATGCGC"}'
 ```
-#### 1️⃣ GC Content syntax for windows 
-```
-curl -X POST "http://127.0.0.1:8000/gc-content/" -H "Content-Type: application/json" -d "{\"sequence\": \"ATGCGC\"}"
-```
-> **Response:**
+**Response:**
 ```json
-{"sequence":"ATGCGC","gc_content":66.67}
-```
+@prefix bio: <http://example.org/bio#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-#### 2️⃣ Reverse Complement
-```bash
-curl -X POST "http://127.0.0.1:8000/reverse-complement/" -H "Content-Type: application/json" -d '{"sequence": "ATGCGC"}'
-```
-> **Response:**
-```json
-{"sequence":"ATGCGC","reverse_complement":"GCGCAT"}
+<http://example.org/sequence/4cd8a511-82b8-473c-8174-47514e83150c> a bio:DNASequence ;
+    bio:gcContent "66.67"^^xsd:float ;
+    bio:reverseComplement "GCGCAT" ;
+    bio:sequence "ATGCGC" ;
+    bio:transcript "AUGCGC" .
 ```
 
-#### 3️⃣ Transcription (DNA ➜ RNA)
+### 🔎 Example Request to /sparql
 ```bash
-curl -X POST "http://127.0.0.1:8000/transcribe/" -H "Content-Type: application/json" -d '{"sequence": "ATGCGC"}'
+curl -X POST http://localhost:8000/sparql \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SELECT * WHERE { ?s a <http://example.org/bio#DNASequence> . }"}'
 ```
-> **Response:**
+
+**SPARQL Query:**
+```
+SELECT * WHERE {
+  ?s a <http://example.org/bio#DNASequence> .
+}
+```
+**Response:**
 ```json
-{"sequence":"ATGCGC","transcription":"AUGCGC"}
+{"results":[{"var0":"http://example.org/sequence/4cd8a511-82b8-473c-8174-47514e83150c"}]}```
 ```
+
 ---
 
 ## 🧪 Multivariate GWAS (Genome-Wide Association Studies)
@@ -96,6 +99,17 @@ curl -X GET "http://127.0.0.1:8000/download-vcf?url=https://1000genomes.s3.amazo
 
 ```bash
 curl -X GET "http://127.0.0.1:8000/run-gwas?vcf_path=./asset/generated_output/ALL.chr22.phase3_shapeit2_mvncall_integrated_v5a.20130502.genotypes.vcf.gz&snps=200"
+```
+
+**Response:**
+```json
+{
+  "message": "GWAS completed",
+  "num_snps_tested": 200,
+  "result_file": "./asset/generated_output/gwas_results.csv",
+  "manhattan_plot": "./asset/generated_output/manhattan_plot.png",
+  "qq_plot": "./asset/generated_output/qq_plot.png"
+}
 ```
 
 #### 📦 Workflow Overview Explained for the above GWAS execution
@@ -166,16 +180,7 @@ Both plots are saved as image files and can be used for reporting or publication
 
 
 
-**Response:**
-```json
-{
-  "message": "GWAS completed",
-  "num_snps_tested": 200,
-  "result_file": "./asset/generated_output/gwas_results.csv",
-  "manhattan_plot": "./asset/generated_output/manhattan_plot.png",
-  "qq_plot": "./asset/generated_output/qq_plot.png"
-}
-```
+
 📷 Expected Manhattan Plot:
 ![Manhattan Plot](./asset/readme_asset/manhattan_plot.png)
 
@@ -220,7 +225,13 @@ curl -X POST "http://127.0.0.1:8000/analyze-image/"   -H "accept: application/js
   "nuclei_contour": "http://127.0.0.1:8000/download/microscopic_sample.geojson"
 }
 ```
+Download result files:
 
+```bash
+curl -o ./asset/generated_output/microscopic_sample.png http://127.0.0.1:8000/download/microscopic_sample.png
+curl -o ./asset/generated_output/microscopic_sample.csv http://127.0.0.1:8000/download/microscopic_sample.csv
+curl -o ./asset/generated_output/microscopic_sample.geojson http://127.0.0.1:8000/download/microscopic_sample.geojson
+```
 📌 Outputs:
 - ![Processed Image](./asset/readme_asset/microscopic_sample.png)
 - [📄 Nuclei Shape CSV](./asset/readme_asset/microscopic_sample.csv)
