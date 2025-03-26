@@ -18,6 +18,17 @@ Run the API:
 uvicorn gwas_fastapi_app:app --reload
 ```
 
+
+### 🔧 Build the Docker Image
+```bash
+docker build -t bioinformatics_restapi .
+```
+
+### 🚦 Run the Container
+```bash
+docker run -d -p 8000:8000 bioinformatics_restapi
+```
+
 ---
 
 ## 🧪 Endpoints

@@ -40,6 +40,10 @@ curl -X GET "http://127.0.0.1:8000/"
 ```bash
 curl -X POST "http://127.0.0.1:8000/gc-content/" -H "Content-Type: application/json" -d '{"sequence": "ATGCGC"}'
 ```
+#### 1️⃣ GC Content for windows 
+```
+curl -X POST "http://127.0.0.1:8000/gc-content/" -H "Content-Type: application/json" -d "{\"sequence\": \"ATGCGC\"}"
+```
 > **Response:**
 ```json
 {"sequence":"ATGCGC","gc_content":66.67}

@@ -10,3 +10,5 @@ seaborn
 scikit-learn
 shapely
 geojson
+statsmodels
+
